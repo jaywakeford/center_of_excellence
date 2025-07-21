@@ -1,0 +1,470 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==== USERS AND AUTHENTICATION ====
+model User {
+  id              String          @id @default(cuid())
+  email           String          @unique
+  password        String
+  firstName       String
+  lastName        String
+  department      String?
+  jobTitle        String?
+  phoneNumber     String?
+  avatar          String?
+  isActive        Boolean         @default(true)
+  emailVerified   Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  roles           UserRole[]
+  sessions        UserSession[]
+  innovations     Innovation[]
+  comments        InnovationComment[]
+  votes           InnovationVote[]
+  rapidDecisions  RapidDecision[] @relation("DecisionCreator")
+  rapidRoles      RapidRole[]
+  rapidApprovals  RapidApproval[]
+  notifications   Notification[]
+  activities      ActivityLog[]
+
+  @@index([email])
+}
+
+model Role {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  description String?
+  permissions Json        // Array of permission strings
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  users       UserRole[]
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  assignedAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model UserSession {
+  id           String   @id @default(cuid())
+  userId       String
+  token        String   @unique
+  refreshToken String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  // Relations
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+// ==== CENTER OF EXCELLENCE ====
+model Innovation {
+  id              String      @id @default(cuid())
+  title           String
+  description     String      @db.Text
+  businessCase    String?     @db.Text
+  estimatedSavings Float?
+  implementationCost Float?
+  timeToImplement Int?        // in days
+  status          InnovationStatus @default(SUBMITTED)
+  categoryId      String
+  creatorId       String
+  department      String?
+  priority        Priority    @default(MEDIUM)
+  implementedAt   DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  creator         User        @relation(fields: [creatorId], references: [id])
+  category        InnovationCategory @relation(fields: [categoryId], references: [id])
+  comments        InnovationComment[]
+  votes           InnovationVote[]
+  attachments     InnovationAttachment[]
+  metrics         InnovationMetric[]
+  rapidDecisions  RapidDecision[]
+
+  @@index([creatorId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model InnovationCategory {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  description String?
+  color       String?     // For UI display
+  icon        String?     // Icon name or path
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  innovations Innovation[]
+}
+
+model InnovationComment {
+  id           String   @id @default(cuid())
+  content      String   @db.Text
+  innovationId String
+  userId       String
+  parentId     String?  // For nested comments
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  innovation   Innovation @relation(fields: [innovationId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id])
+  parent       InnovationComment? @relation("CommentReplies", fields: [parentId], references: [id])
+  replies      InnovationComment[] @relation("CommentReplies")
+
+  @@index([innovationId])
+  @@index([userId])
+}
+
+model InnovationVote {
+  id           String   @id @default(cuid())
+  innovationId String
+  userId       String
+  value        Int      // 1 for upvote, -1 for downvote
+  createdAt    DateTime @default(now())
+
+  // Relations
+  innovation   Innovation @relation(fields: [innovationId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id])
+
+  @@unique([innovationId, userId])
+  @@index([innovationId])
+  @@index([userId])
+}
+
+model InnovationAttachment {
+  id           String   @id @default(cuid())
+  innovationId String
+  fileName     String
+  fileUrl      String
+  fileSize     Int
+  mimeType     String
+  uploadedAt   DateTime @default(now())
+
+  // Relations
+  innovation   Innovation @relation(fields: [innovationId], references: [id], onDelete: Cascade)
+
+  @@index([innovationId])
+}
+
+// ==== RAPID FRAMEWORK ====
+model RapidDecision {
+  id             String      @id @default(cuid())
+  title          String
+  description    String      @db.Text
+  context        String?     @db.Text
+  deadline       DateTime?
+  status         DecisionStatus @default(DRAFT)
+  priority       Priority    @default(MEDIUM)
+  creatorId      String
+  innovationId   String?     // Optional link to innovation
+  outcome        String?     @db.Text
+  completedAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  creator        User        @relation("DecisionCreator", fields: [creatorId], references: [id])
+  innovation     Innovation? @relation(fields: [innovationId], references: [id])
+  roles          RapidRole[]
+  approvals      RapidApproval[]
+  workflowSteps  RapidWorkflowStep[]
+
+  @@index([creatorId])
+  @@index([status])
+}
+
+model RapidRole {
+  id           String      @id @default(cuid())
+  decisionId   String
+  userId       String
+  roleType     RapidRoleType
+  status       RoleStatus  @default(PENDING)
+  comments     String?     @db.Text
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  decision     RapidDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id])
+
+  @@unique([decisionId, userId, roleType])
+  @@index([decisionId])
+  @@index([userId])
+}
+
+model RapidApproval {
+  id           String      @id @default(cuid())
+  decisionId   String
+  userId       String
+  status       ApprovalStatus
+  comments     String?     @db.Text
+  approvedAt   DateTime?
+  createdAt    DateTime    @default(now())
+
+  // Relations
+  decision     RapidDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id])
+
+  @@index([decisionId])
+  @@index([userId])
+}
+
+model RapidWorkflowStep {
+  id           String      @id @default(cuid())
+  decisionId   String
+  stepNumber   Int
+  name         String
+  description  String?
+  status       StepStatus  @default(PENDING)
+  assignedRole RapidRoleType?
+  dueDate      DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  decision     RapidDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  @@unique([decisionId, stepNumber])
+  @@index([decisionId])
+}
+
+// ==== ANALYTICS AND METRICS ====
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  eventType  String
+  userId     String?
+  properties Json
+  metadata   Json?
+  timestamp  DateTime @default(now())
+
+  @@index([eventType])
+  @@index([userId])
+  @@index([timestamp])
+}
+
+model PerformanceMetric {
+  id          String   @id @default(cuid())
+  metricName  String
+  value       Float
+  unit        String?
+  category    String
+  tags        Json?    // Array of tags for filtering
+  timestamp   DateTime @default(now())
+
+  @@index([metricName])
+  @@index([category])
+  @@index([timestamp])
+}
+
+model CostSaving {
+  id              String   @id @default(cuid())
+  innovationId    String?
+  amount          Float
+  currency        String   @default("USD")
+  category        String
+  description     String?
+  validatedBy     String?
+  validatedAt     DateTime?
+  projectedDate   DateTime
+  actualDate      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([innovationId])
+  @@index([category])
+}
+
+model PredictiveModel {
+  id           String   @id @default(cuid())
+  modelName    String
+  modelType    String   // regression, classification, etc.
+  version      String
+  accuracy     Float?
+  features     Json     // Feature configuration
+  parameters   Json     // Model parameters
+  trainingData Json?    // Training metadata
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  predictions  Prediction[]
+
+  @@unique([modelName, version])
+}
+
+model Prediction {
+  id           String   @id @default(cuid())
+  modelId      String
+  targetType   String   // cost_saving, success_probability, etc.
+  targetId     String?  // ID of the entity being predicted
+  prediction   Json     // Prediction results
+  confidence   Float?
+  features     Json     // Input features used
+  createdAt    DateTime @default(now())
+
+  // Relations
+  model        PredictiveModel @relation(fields: [modelId], references: [id])
+
+  @@index([modelId])
+  @@index([targetType])
+  @@index([targetId])
+}
+
+model InnovationMetric {
+  id           String   @id @default(cuid())
+  innovationId String
+  metricType   String   // views, engagement, implementation_progress, etc.
+  value        Float
+  timestamp    DateTime @default(now())
+
+  // Relations
+  innovation   Innovation @relation(fields: [innovationId], references: [id], onDelete: Cascade)
+
+  @@index([innovationId])
+  @@index([metricType])
+  @@index([timestamp])
+}
+
+// ==== SYSTEM FEATURES ====
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  content     String
+  data        Json?    // Additional data for the notification
+  read        Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String
+  details     Json?
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime @default(now())
+
+  // Relations
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([timestamp])
+}
+
+model DashboardConfig {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  widgets     Json     // Array of widget configurations
+  layout      Json     // Dashboard layout configuration
+  theme       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ==== ENUMS ====
+enum InnovationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  IN_PROGRESS
+  IMPLEMENTED
+  REJECTED
+  ON_HOLD
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DecisionStatus {
+  DRAFT
+  ACTIVE
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RapidRoleType {
+  RECOMMEND
+  AGREE
+  PERFORM
+  INPUT
+  DECIDE
+}
+
+enum RoleStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+enum ApprovalStatus {
+  APPROVED
+  REJECTED
+  PENDING
+  ABSTAINED
+}
+
+enum StepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+  SKIPPED
+}
